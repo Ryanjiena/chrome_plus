@@ -3,44 +3,66 @@ name: build
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    tags:
+      - "*"
 
 jobs:
   build:
     strategy:
       matrix:
-        include: [
-            { name: windows_x86, arch: x86 },
-            { name: windows_x64, arch: x64 },
-        ]
+        include:
+          [{ name: windows_x86, arch: x86 }, { name: windows_x64, arch: x64 }]
 
     name: ${{ matrix.name }}
 
     runs-on: windows-latest
 
     steps:
-    - name: checkout
-      uses: actions/checkout@v2
-      with:
-        submodules: 'true'
+      - name: checkout
+        uses: actions/checkout@v2
+        with:
+          submodules: "true"
 
-    - name: setup VC-LTL
-      working-directory: ${{env.GITHUB_WORKSPACE}}
-      run: nuget install VC-LTL
+      - name: setup VC-LTL
+        working-directory: ${{env.GITHUB_WORKSPACE}}
+        run: nuget install VC-LTL
 
-    - name: setup xmake
-      uses: xmake-io/github-action-setup-xmake@v1
+      - name: setup xmake
+        uses: xmake-io/github-action-setup-xmake@v1
 
-    - name: configure
-      run: xmake f -a ${{ matrix.arch }}
+      - name: configure
+        run: xmake f -a ${{ matrix.arch }}
 
-    - name: build
-      run: xmake
+      - name: build
+        run: xmake
 
-    - name: upload
-      uses: actions/upload-artifact@v3
-      with:
-        name: ${{ matrix.name }}
-        path: build/release
+      - name: upload
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.name }}
+          path: build/release
+
+      - name: Package info
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path C:\Chrome_Plus_Release -Force | Out-Null
+          cd build\release\
+          7z a -mx9 "C:\Chrome_Plus_Release\chrome_plus_${{ matrix.arch }}.7z" version.dll
+          echo "$((Get-FileHash -Algorithm SHA256 C:\Chrome_Plus_Release\chrome_plus_${{ matrix.arch }}.7z).Hash)" | Out-File "C:\Chrome_Plus_Release\chrome_plus_${{ matrix.arch }}.7z.sha256" -Encoding ASCII
+
+      - name: Get tag name
+        uses: olegtarasov/get-tag@v2.1
+        id: tagName
+        if: startsWith(github.ref, 'refs/tags/')
+        # with:
+        #   tagRegex: "v(.*)"
+
+      - name: Create a release when a tag is pushed
+        uses: ncipollo/release-action@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          allowUpdates: true
+          artifacts: C:\Chrome_Plus_Release\*
+          name: v${{ steps.tagName.outputs.tag }}
+          token: ${{ secrets.GH_TOKEN }}
